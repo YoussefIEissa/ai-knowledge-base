@@ -9,7 +9,7 @@ The frontend is a separate application. It does not change the backend, and it t
 - Node.js 20.19 or newer (developed with Node 24)
 - npm
 - The FastAPI backend running on `http://127.0.0.1:8000`
-- LM Studio serving the model on `http://localhost:1234`, needed only for asking questions
+- The language model file downloaded by the backend's `scripts/download_model.py`, needed only for asking questions. On this branch the backend runs the model itself; LM Studio is not used.
 
 ## Install
 
@@ -86,6 +86,7 @@ The backend has no conversation memory. Each question is sent on its own, withou
 - **Sources** show filename, section headings, similarity score and chunk ID. The API does not return the passage text, so it cannot be displayed.
 - **Citation markers** such as `[Source 2]` in an answer are linked to the second returned source. This is reliable because the backend numbers passages in the prompt in the order it returns them. Markers with a number outside the returned range are left as plain text.
 - **Answers arrive all at once.** The API does not stream, so the interface shows a waiting state with elapsed time. "Stop" ends the wait in the browser; the backend may still finish generating.
+- **Questions are answered one at a time.** The backend runs a single local model, so a question asked while another is being answered waits for its turn.
 - **Deleting a document** removes its library record only. The backend leaves the PDF file and the indexed passages in place, so a deleted document can still appear as a source when searching all indexed documents.
 - **Editing a document** updates the stored record only. Nothing is re-indexed, so answers keep reflecting the original PDF.
 - **Uploads** show measured progress while the file is being sent, then an indeterminate state while the backend converts and indexes it. The backend cannot answer other requests during that time, so the status indicator may show "not responding" until it finishes.
@@ -97,9 +98,11 @@ The backend has no conversation memory. Each question is sent on its own, withou
 |---|---|---|
 | "Backend unreachable" and documents fail to load | FastAPI is not running, or it is on another address | Start it with `uv run uvicorn app:app --reload`, or set `KNOWLEDGE_API_URL` |
 | "Backend not responding" during or after an upload | The backend is busy converting a PDF | Wait for the upload to finish |
-| "Unable to generate an answer right now." | Retrieval or the language model failed | Check that LM Studio is running with the model loaded |
+| "Unable to generate an answer right now." | Retrieval or the language model failed | Check the backend log |
+| "The language model is not available…" | The model file has not been downloaded, or an `LLM_*` setting is invalid | Run `uv run python scripts/download_model.py` in the project root; the backend log names the exact problem |
+| "The language model took too long to answer." | Generation passed the time limit, or earlier questions were still being answered | Ask again, ask a shorter question, or raise `LLM_TIMEOUT_SECONDS` on the backend |
 | "The RAG service is unavailable…" | The vector database or embedding model could not be opened | Check the backend log; make sure no other process has `qdrant_db/` open |
-| The first question is slow | The backend loads the embedding model on first use | Wait; later questions are faster |
+| The first question is slow | The backend loads the embedding model and the language model on first use | Wait; later questions are faster |
 | Upload fails with "Only PDF files are supported" | The file is not a PDF | Upload a `.pdf` file of 40 MB or less |
 
 ## Project layout

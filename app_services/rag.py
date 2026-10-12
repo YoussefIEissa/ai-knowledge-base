@@ -3,9 +3,10 @@ import logging
 import uuid
 from pathlib import Path
 from docling.chunking import HybridChunker
-from openai import OpenAI
 from qdrant_client import QdrantClient, models
 from sentence_transformers import SentenceTransformer
+
+from app_services.llm import LocalLLM
 # ---------------------------------------------------------
 # Configuration
 # ---------------------------------------------------------
@@ -13,9 +14,6 @@ PROJECT_ROOT = Path(__file__).resolve().parent.parent
 QDRANT_PATH = PROJECT_ROOT / "qdrant_db"
 COLLECTION_NAME = "knowledge_base"
 EMBEDDING_MODEL = "sentence-transformers/all-MiniLM-L6-v2"
-LM_STUDIO_BASE_URL = "http://localhost:1234/v1"
-LM_STUDIO_API_KEY = "lm-studio"
-LLM_MODEL = "google/gemma-4-e4b"
 VECTOR_SIZE = 384
 TOP_K = 5
 EMBEDDING_BATCH_SIZE = 32
@@ -39,11 +37,10 @@ class RAGApplication:
             raise ValueError(
                 f"Qdrant collection '{COLLECTION_NAME}' does not exist."
             )
-        self.llm = OpenAI(
-            base_url=LM_STUDIO_BASE_URL,
-            api_key=LM_STUDIO_API_KEY,
-            timeout=120.0,
-        )
+        # The language model is loaded on the first question, not here,
+        # so uploads and retrieval work without it. Its settings come
+        # from LLM_* environment variables (see app_services/llm.py).
+        self.llm = LocalLLM()
     # -----------------------------------------------------
     # Document ingestion
     # -----------------------------------------------------
@@ -247,9 +244,7 @@ class RAGApplication:
                 f"Content:\n{passage['text']}"
             )
         context = "\n\n".join(context_parts)
-        response = self.llm.chat.completions.create(
-            model=LLM_MODEL,
-            temperature=0.2,
+        answer = self.llm.generate(
             messages=[
                 {
                     "role": "system",
@@ -273,8 +268,7 @@ class RAGApplication:
                 },
             ],
         )
-        answer = response.choices[0].message.content
-        if not answer:
+        if not answer.strip():
             return "The language model returned an empty answer."
         return answer.strip()
     # -----------------------------------------------------
@@ -312,7 +306,7 @@ class RAGApplication:
     # Cleanup
     # -----------------------------------------------------
     def close(self) -> None:
-        """Release database and HTTP client resources."""
+        """Release the language model and database resources."""
         try:
             self.llm.close()
         finally:

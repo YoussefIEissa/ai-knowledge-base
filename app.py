@@ -10,6 +10,7 @@ from docling.document_converter import DocumentConverter
 from fastapi import FastAPI, File, HTTPException, Request, UploadFile, status
 from pydantic import BaseModel, ConfigDict, Field, field_validator
 
+from app_services.llm import LLMTimeoutError, LLMUnavailableError
 from app_services.rag import RAGApplication
 
 
@@ -227,8 +228,7 @@ def get_rag_service(request: Request) -> RAGApplication:
                 status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
                 detail=(
                     "The RAG service is unavailable. "
-                    "Check the vector database, embedding model, "
-                    "and LM Studio configuration."
+                    "Check the vector database and embedding model."
                 ),
             ) from exc
 
@@ -580,6 +580,28 @@ def ask_question(
             document_id=payload.document_id,
         )
         return result
+
+    except LLMUnavailableError as exc:
+        # The reason (for example a missing model file) is logged, not
+        # returned, so local paths are not exposed to API clients.
+        logger.error("Language model is unavailable: %s", exc)
+
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail=(
+                "The language model is not available. "
+                "Download the model and check the LLM settings; "
+                "the backend log has the details."
+            ),
+        ) from exc
+
+    except LLMTimeoutError as exc:
+        logger.error("Language model timed out: %s", exc)
+
+        raise HTTPException(
+            status_code=status.HTTP_504_GATEWAY_TIMEOUT,
+            detail="The language model took too long to answer.",
+        ) from exc
 
     except Exception as exc:
         logger.exception("RAG request failed")

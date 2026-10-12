@@ -12,9 +12,10 @@ export const QUESTION_MAX_LENGTH = 2000;
 export const UPLOADED_CATEGORY = "uploaded";
 
 /**
- * Pipeline settings read from the backend source (app_services/rag.py) when
- * this frontend was written. The API has no endpoint that reports them, so
- * the UI presents them as configured values, never as live status.
+ * Pipeline defaults read from the backend source (app_services/rag.py and
+ * app_services/llm.py) when this frontend was written. The API has no
+ * endpoint that reports them, so the UI presents them as configured values,
+ * never as live status.
  */
 export const BACKEND_PIPELINE: ReadonlyArray<{ label: string; value: string }> = [
   { label: "PDF conversion", value: "Docling" },
@@ -22,5 +23,8 @@ export const BACKEND_PIPELINE: ReadonlyArray<{ label: string; value: string }> =
   { label: "Embedding model", value: "sentence-transformers/all-MiniLM-L6-v2 (384 dimensions)" },
   { label: "Vector database", value: "Qdrant, local storage, collection “knowledge_base”" },
   { label: "Passages per question", value: "Top 5 by cosine similarity" },
-  { label: "Language model", value: "google/gemma-4-e4b via LM Studio (localhost:1234)" },
+  {
+    label: "Language model",
+    value: "Gemma 4 E4B (GGUF, Q4_0) run inside the backend with llama.cpp",
+  },
 ];

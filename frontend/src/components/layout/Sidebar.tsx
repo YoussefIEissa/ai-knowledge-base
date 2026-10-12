@@ -161,7 +161,7 @@ export function Sidebar({ status, onNavigate, onClose }: SidebarProps) {
       <div className="shrink-0 space-y-3 border-t border-line p-3">
         <StatusIndicator status={status} />
         <p className="px-1 text-[11px] leading-relaxed text-subtle">
-          Local retrieval-augmented generation over your own PDFs. FastAPI, Qdrant and LM Studio.
+          Local retrieval-augmented generation over your own PDFs. FastAPI, Qdrant and llama.cpp.
         </p>
       </div>
     </div>

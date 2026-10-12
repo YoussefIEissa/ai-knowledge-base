@@ -126,9 +126,10 @@ export function SettingsPage() {
           description="How the backend is set up to answer questions."
         >
           <Note className="mb-2">
-            These values were read from the backend's source code when this interface was built.
-            The API does not report them, so they are not checked live and will be out of date if
-            the backend configuration changes.
+            These are the backend's default values, read from its source code when this
+            interface was built. The API does not report them, so they are not checked live and
+            will be out of date if the backend is configured differently, for example with a
+            different model file.
           </Note>
           <dl className="divide-y divide-line">
             {BACKEND_PIPELINE.map((item) => (
@@ -137,7 +138,9 @@ export function SettingsPage() {
               </Row>
             ))}
             <Row label="Model status">
-              <span className="text-muted">Unknown. It is only exercised when you ask a question.</span>
+              <span className="text-muted">
+                Unknown. The backend loads the model file when you ask the first question.
+              </span>
             </Row>
           </dl>
         </Section>

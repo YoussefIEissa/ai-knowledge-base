@@ -12,6 +12,7 @@ __pycache__/
 venv/
 .env
 .env.*
+!.env.example
 
 # Build artifacts
 build/
@@ -31,6 +32,10 @@ output/
 
 # Vector database
 qdrant_db/
+
+# Downloaded language model weights
+models/
+*.gguf
 
 # IDE and OS files
 .vscode/

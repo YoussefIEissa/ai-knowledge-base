@@ -21,7 +21,7 @@ function describeAskError(error: unknown): string {
   const message = describeError(error);
   if (!(error instanceof ApiError)) return message;
   if (error.status === 502) {
-    return `${message} The backend failed while retrieving passages or calling the language model. Check that LM Studio is running with the model loaded.`;
+    return `${message} The backend failed while retrieving passages or running the language model. Check the backend log.`;
   }
   return message;
 }
