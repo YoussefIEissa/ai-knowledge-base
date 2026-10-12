@@ -1,0 +1,39 @@
+
+# Python cache
+__pycache__/
+*.py[cod]
+*.pyo
+.pytest_cache/
+.ruff_cache/
+.mypy_cache/
+
+# Virtual environments
+.venv/
+venv/
+.env
+.env.*
+
+# Build artifacts
+build/
+dist/
+wheels/
+*.egg-info/
+
+# Local databases
+knowledge.db
+*.db
+*.sqlite
+*.sqlite3
+
+# Uploaded and generated documents
+uploads/
+output/
+
+# Vector database
+qdrant_db/
+
+# IDE and OS files
+.vscode/
+.idea/
+.DS_Store
+Thumbs.db
