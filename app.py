@@ -136,12 +136,14 @@ class DocumentUpdate(BaseModel):
     category: str | None = None
 
 
+
 class QuestionRequest(BaseModel):
     """Request body for the RAG question-answering endpoint."""
 
     model_config = ConfigDict(extra="forbid")
 
     question: str = Field(min_length=1, max_length=2000)
+    document_id: str | None = Field(default=None, max_length=255)
 
     @field_validator("question")
     @classmethod
@@ -151,14 +153,28 @@ class QuestionRequest(BaseModel):
 
         return value.strip()
 
+    @field_validator("document_id")
+    @classmethod
+    def validate_document_id(cls, value: str | None) -> str | None:
+        if value is not None:
+            value = value.strip()
+
+            if not value:
+                raise ValueError("document_id cannot be empty or whitespace")
+
+        return value
+
+
 
 class SourceResponse(BaseModel):
     """Metadata for a passage retrieved from Qdrant."""
 
+    document_id: str | None = None
     source_filename: str | None = None
     headings: list[str] = Field(default_factory=list)
     chunk_id: str | None = None
     score: float | None = None
+
 
 
 class AskResponse(BaseModel):
@@ -548,20 +564,21 @@ async def upload_pdf(
 # Ask a question using RAG
 # --------------------------------------------------
 
+
 @app.post("/ask", response_model=AskResponse)
 def ask_question(
     payload: QuestionRequest,
     request: Request,
 ):
-    """
-    Retrieve relevant passages from Qdrant and generate an answer
-    using the LLM configured in app_services/rag.py.
-    """
+    """Answer a question using retrieved document passages."""
+
     rag = get_rag_service(request)
 
     try:
-        result = rag.ask(payload.question)
-
+        result = rag.ask(
+            payload.question,
+            document_id=payload.document_id,
+        )
         return result
 
     except Exception as exc:
@@ -571,3 +588,4 @@ def ask_question(
             status_code=status.HTTP_502_BAD_GATEWAY,
             detail="Unable to generate an answer right now.",
         ) from exc
+

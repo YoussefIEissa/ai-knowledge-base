@@ -1,0 +1,48 @@
+
+[
+  {
+    "id": "recipe_001",
+    "question": "How long does Koshari take to prepare?",
+    "document_id": "b065969b56cc4b72b78ded4422eb5faf.pdf",
+    "expected_answer": "60 minutes",
+    "relevant_headings": ["3. Koshari"],
+    "answerable": true
+  },
+  {
+    "id": "recipe_002",
+    "question": "How many people does Koshari serve?",
+    "document_id": "b065969b56cc4b72b78ded4422eb5faf.pdf",
+    "expected_answer": "4 people",
+    "relevant_headings": ["3. Koshari"],
+    "answerable": true
+  },
+  {
+    "id": "recipe_003",
+    "question": "Which recipes take 25 minutes?",
+    "document_id": "b065969b56cc4b72b78ded4422eb5faf.pdf",
+    "expected_answer": "Chicken Stir-Fry, Shakshuka, Creamy Mushroom Pasta, and Beef Burgers",
+    "relevant_headings": [
+      "2. Chicken Stir-Fry",
+      "4. Shakshuka",
+      "5. Creamy Mushroom Pasta",
+      "7. Beef Burgers"
+    ],
+    "answerable": true
+  },
+  {
+    "id": "recipe_004",
+    "question": "What is the exact price of Koshari at a restaurant in Cairo?",
+    "document_id": "b065969b56cc4b72b78ded4422eb5faf.pdf",
+    "expected_answer": null,
+    "relevant_headings": [],
+    "answerable": false
+  },
+  {
+    "id": "recipe_005",
+    "question": "What is the capital of France?",
+    "document_id": "b065969b56cc4b72b78ded4422eb5faf.pdf",
+    "expected_answer": null,
+    "relevant_headings": [],
+    "answerable": false
+  }
+]

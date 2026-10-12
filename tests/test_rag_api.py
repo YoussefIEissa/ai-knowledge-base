@@ -18,21 +18,29 @@ def client(tmp_path, monkeypatch):
         yield test_client
 
 
+
 class FakeRAG:
     """A predictable RAG service for API tests."""
 
     def __init__(self):
         self.received_questions = []
+        self.received_document_ids = []
         self.closed = False
 
-    def ask(self, question: str) -> dict:
+    def ask(
+        self,
+        question: str,
+        document_id: str | None = None,
+    ) -> dict:
         self.received_questions.append(question)
+        self.received_document_ids.append(document_id)
 
         return {
             "question": question,
             "answer": "Query, key, and value vectors support attention.",
             "sources": [
                 {
+                    "document_id": document_id or "test-document-id",
                     "source_filename": "attention.pdf",
                     "headings": ["Self-Attention"],
                     "chunk_id": "test-chunk-123",
@@ -43,6 +51,7 @@ class FakeRAG:
 
     def close(self):
         self.closed = True
+
 
 
 def test_ask_returns_answer_and_sources(client, monkeypatch):
@@ -167,3 +176,38 @@ def test_rag_service_is_reused(client, monkeypatch):
         "First question?",
         "Second question?",
     ]
+
+
+def test_ask_passes_document_id_to_rag(client, monkeypatch):
+    """A document-specific question should pass its ID to RAG."""
+    fake_rag = FakeRAG()
+    monkeypatch.setattr(app_module, "RAGApplication", lambda: fake_rag)
+
+    response = client.post(
+        "/ask",
+        json={
+            "question": "What delivery services does Bosta offer?",
+            "document_id": "cd9be4c21dd845eb8a3e30e441f8f7c9.pdf",
+        },
+    )
+
+    assert response.status_code == 200
+    assert fake_rag.received_document_ids == [
+        "cd9be4c21dd845eb8a3e30e441f8f7c9.pdf"
+    ]
+    assert response.json()["sources"][0]["document_id"] == (
+        "cd9be4c21dd845eb8a3e30e441f8f7c9.pdf"
+    )
+
+
+def test_ask_rejects_blank_document_id(client):
+    """A blank document ID should be rejected."""
+    response = client.post(
+        "/ask",
+        json={
+            "question": "What delivery services does Bosta offer?",
+            "document_id": "   ",
+        },
+    )
+
+    assert response.status_code == 422
