@@ -1,11 +1,24 @@
+
+import logging
 import sqlite3
 import uuid
-from fastapi import File, UploadFile
+from app_services.ingestion import ingest_pdf
 from contextlib import asynccontextmanager, closing, contextmanager
 from pathlib import Path
+
 from docling.document_converter import DocumentConverter
-from fastapi import FastAPI, HTTPException, status
+from fastapi import FastAPI, File, HTTPException, Request, UploadFile, status
 from pydantic import BaseModel, ConfigDict, Field, field_validator
+
+from app_services.rag import RAGApplication
+
+
+# --------------------------------------------------
+# Logging
+# --------------------------------------------------
+
+logging.basicConfig(level=logging.INFO)
+logger = logging.getLogger(__name__)
 
 
 # --------------------------------------------------
@@ -14,6 +27,9 @@ from pydantic import BaseModel, ConfigDict, Field, field_validator
 
 DATABASE_PATH = Path(__file__).resolve().with_name("knowledge.db")
 
+UPLOAD_DIR = Path(__file__).resolve().with_name("uploads")
+MAX_FILE_SIZE = 40 * 1024 * 1024  # 40 MB
+
 
 @contextmanager
 def get_db_connection():
@@ -21,7 +37,6 @@ def get_db_connection():
     with closing(sqlite3.connect(DATABASE_PATH)) as connection:
         with connection:
             yield connection
-
 
 
 def initialize_database():
@@ -59,18 +74,40 @@ def initialize_database():
             )
 
 
-
 # --------------------------------------------------
 # FastAPI application lifecycle
 # --------------------------------------------------
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
+    """Initialize shared resources and clean them up at shutdown."""
     initialize_database()
-    yield
+
+    # Initialize RAG lazily when /ask is first called.
+    # This avoids loading embedding models for CRUD-only requests.
+    app.state.rag = None
+
+    try:
+        yield
+    finally:
+        rag = getattr(app.state, "rag", None)
+
+        if rag is not None:
+            try:
+                rag.close()
+            except Exception:
+                logger.exception("Failed to close the RAG service")
 
 
-app = FastAPI(lifespan=lifespan)
+app = FastAPI(
+    title="AI Knowledge Base API",
+    description=(
+        "A document management API with PDF extraction "
+        "and retrieval-augmented question answering."
+    ),
+    version="0.2.0",
+    lifespan=lifespan,
+)
 
 
 # --------------------------------------------------
@@ -87,6 +124,7 @@ class Document(BaseModel):
     def reject_blank_strings(cls, value: str) -> str:
         if not value.strip():
             raise ValueError("Field cannot be empty or whitespace")
+
         return value
 
 
@@ -96,6 +134,39 @@ class DocumentUpdate(BaseModel):
     title: str | None = None
     content: str | None = None
     category: str | None = None
+
+
+class QuestionRequest(BaseModel):
+    """Request body for the RAG question-answering endpoint."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    question: str = Field(min_length=1, max_length=2000)
+
+    @field_validator("question")
+    @classmethod
+    def reject_blank_question(cls, value: str) -> str:
+        if not value.strip():
+            raise ValueError("Question cannot be empty or whitespace")
+
+        return value.strip()
+
+
+class SourceResponse(BaseModel):
+    """Metadata for a passage retrieved from Qdrant."""
+
+    source_filename: str | None = None
+    headings: list[str] = Field(default_factory=list)
+    chunk_id: str | None = None
+    score: float | None = None
+
+
+class AskResponse(BaseModel):
+    """Response returned by the RAG endpoint."""
+
+    question: str
+    answer: str
+    sources: list[SourceResponse]
 
 
 def validate_update_fields(updates: dict):
@@ -115,10 +186,47 @@ def validate_update_fields(updates: dict):
 
 
 # --------------------------------------------------
+# RAG service
+# --------------------------------------------------
+
+def get_rag_service(request: Request) -> RAGApplication:
+    """
+    Return the shared RAG service.
+
+    Create it on the first request and reuse it afterward.
+    """
+    rag = getattr(request.app.state, "rag", None)
+
+    if rag is None:
+        logger.info("Initializing RAG service...")
+
+        try:
+            rag = RAGApplication()
+            request.app.state.rag = rag
+
+        except Exception as exc:
+            logger.exception("Failed to initialize RAG service")
+
+            raise HTTPException(
+                status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+                detail=(
+                    "The RAG service is unavailable. "
+                    "Check the vector database, embedding model, "
+                    "and LM Studio configuration."
+                ),
+            ) from exc
+
+    return rag
+
+
+# --------------------------------------------------
 # Create a document
 # --------------------------------------------------
 
-@app.post("/documents", status_code=status.HTTP_201_CREATED)
+@app.post(
+    "/documents",
+    status_code=status.HTTP_201_CREATED,
+)
 def create_document(document: Document):
     with get_db_connection() as connection:
         cursor = connection.execute(
@@ -141,7 +249,6 @@ def create_document(document: Document):
 # Retrieve all documents
 # --------------------------------------------------
 
-
 @app.get("/documents")
 def get_documents(
     category: str | None = None,
@@ -163,11 +270,11 @@ def get_documents(
 
     with get_db_connection() as connection:
         connection.row_factory = sqlite3.Row
+
         cursor = connection.execute(query, parameters)
         rows = cursor.fetchall()
 
         return [dict(row) for row in rows]
-
 
 
 # --------------------------------------------------
@@ -289,15 +396,19 @@ def delete_document(document_id: int):
             )
 
 
+# --------------------------------------------------
+# Upload and extract a PDF
+# --------------------------------------------------
 
 
-UPLOAD_DIR = Path(__file__).resolve().with_name("uploads")
-MAX_FILE_SIZE = 40 * 1024 * 1024  # 40 MB
-
-
-
-@app.post("/documents/upload", status_code=status.HTTP_201_CREATED)
-async def upload_pdf(file: UploadFile = File(...)):
+@app.post(
+    "/documents/upload",
+    status_code=status.HTTP_201_CREATED,
+)
+async def upload_pdf(
+    request: Request,
+    file: UploadFile = File(...),
+):
     if file.content_type != "application/pdf":
         raise HTTPException(
             status_code=status.HTTP_415_UNSUPPORTED_MEDIA_TYPE,
@@ -316,6 +427,7 @@ async def upload_pdf(file: UploadFile = File(...)):
     saved_filename = f"{uuid.uuid4().hex}.pdf"
     destination = UPLOAD_DIR / saved_filename
     size = 0
+    document_id = None
 
     try:
         # 1. Save the uploaded PDF in chunks.
@@ -339,7 +451,7 @@ async def upload_pdf(file: UploadFile = File(...)):
                     detail="Uploaded file does not appear to be a PDF",
                 )
 
-        # 3. Extract the PDF content as Markdown.
+        # 3. Convert the PDF with Docling.
         converter = DocumentConverter()
         result = converter.convert(destination)
         markdown = result.document.export_to_markdown()
@@ -350,7 +462,7 @@ async def upload_pdf(file: UploadFile = File(...)):
                 detail="No text could be extracted from the PDF",
             )
 
-        # 4. Save the extracted content and PDF metadata in SQLite.
+        # 4. Save the document in SQLite.
         with get_db_connection() as connection:
             cursor = connection.execute(
                 """
@@ -374,20 +486,88 @@ async def upload_pdf(file: UploadFile = File(...)):
 
             document_id = cursor.lastrowid
 
-        # 5. Return a useful summary.
+        # 5. Get the shared RAG service.
+        rag = get_rag_service(request)
+
+        # 6. Chunk, embed, and index the Docling document.
+        chunks_indexed = rag.index_document(
+            document=result.document,
+            document_id=saved_filename,
+            source_filename=original_filename,
+        )
+
+        # 7. Return the ingestion summary.
         return {
             "id": document_id,
-            "message": "PDF uploaded and processed successfully",
+            "message": "PDF uploaded and indexed successfully",
             "source_filename": original_filename,
             "filename": saved_filename,
             "size_bytes": size,
             "extracted_characters": len(markdown),
             "category": "uploaded",
+            "ingestion": {
+                "chunks_indexed": chunks_indexed,
+                "vector_size": 384,
+                "collection": "knowledge_base",
+            },
         }
 
-    except Exception:
+    except Exception as exc:
+        # Remove the SQLite record if ingestion fails.
+        if document_id is not None:
+            try:
+                with get_db_connection() as connection:
+                    connection.execute(
+                        "DELETE FROM documents WHERE id = ?",
+                        (document_id,),
+                    )
+            except Exception:
+                logger.exception(
+                    "Failed to roll back document %s from SQLite",
+                    document_id,
+                )
+
         destination.unlink(missing_ok=True)
-        raise
+
+        logger.exception("PDF upload or ingestion failed")
+
+        # Preserve expected HTTP validation errors.
+        if isinstance(exc, HTTPException):
+            raise
+
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="PDF upload or indexing failed.",
+        ) from exc
 
     finally:
         await file.close()
+
+
+# --------------------------------------------------
+# Ask a question using RAG
+# --------------------------------------------------
+
+@app.post("/ask", response_model=AskResponse)
+def ask_question(
+    payload: QuestionRequest,
+    request: Request,
+):
+    """
+    Retrieve relevant passages from Qdrant and generate an answer
+    using the LLM configured in app_services/rag.py.
+    """
+    rag = get_rag_service(request)
+
+    try:
+        result = rag.ask(payload.question)
+
+        return result
+
+    except Exception as exc:
+        logger.exception("RAG request failed")
+
+        raise HTTPException(
+            status_code=status.HTTP_502_BAD_GATEWAY,
+            detail="Unable to generate an answer right now.",
+        ) from exc
